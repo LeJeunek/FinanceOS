@@ -65,6 +65,8 @@ async function fetchTransactions(
   if (filters.search) params.set("search", filters.search)
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom)
   if (filters.dateTo) params.set("dateTo", filters.dateTo)
+  if (filters.sortBy) params.set("sortBy", filters.sortBy)
+  if (filters.sortDir) params.set("sortDir", filters.sortDir)
   const queryString = params.toString()
 
   const response = await fetch(

@@ -172,10 +172,21 @@ export function TransactionTable({
   // `useState`s) so `handleSortToggle` can read the *previous* field inside
   // one functional updater without a stale-closure bug — reading two
   // separate `useState` setters' previous values together isn't possible.
+  //
+  // Defaults to oldest-first when jumping in from "Review N suggestions":
+  // `generateAutomaticSuggestionsForUser`'s eligibility query processes a
+  // user's OLDEST Uncategorized transactions first (categorization.ts's own
+  // `orderBy: { createdAt: "asc" }`), so with any backlog larger than one
+  // batch, the newest-first default sort would bury every just-generated
+  // suggestion on a later page — the table would look completely unfiltered
+  // (every visible row still plain "Uncategorized", no inline badge) even
+  // though the suggestions really were created, reading as "doesn't work"
+  // rather than "scroll/page further." Oldest-first is what actually surfaces
+  // them on page 1, matching the exact order they were generated in.
   const [sort, setSort] = React.useState<{
     field: TransactionSortField
     dir: "asc" | "desc"
-  }>({ field: "date", dir: "desc" })
+  }>({ field: "date", dir: jumpToUncategorized ? "asc" : "desc" })
   const sortBy = sort.field
   const sortDir = sort.dir
   const [deletingTransaction, setDeletingTransaction] = React.useState<Transaction | null>(null)

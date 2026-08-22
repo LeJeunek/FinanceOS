@@ -2,6 +2,7 @@ import type {
   Receipt as PrismaReceipt,
   Transaction as PrismaTransaction,
 } from "@prisma/client"
+import type { TransactionSortField } from "@/features/transactions/server/validation"
 
 // Re-export the Uncategorized sentinel from the Dashboard module rather than
 // declaring a second one here. Both modules need the exact same string value
@@ -103,6 +104,8 @@ export interface TransactionListFilters {
   dateFrom?: string
   /** `"yyyy-mm-dd"` — see `server/validation.ts`'s `dateOnlySchema`. */
   dateTo?: string
+  sortBy?: TransactionSortField
+  sortDir?: "asc" | "desc"
 }
 
 /**
