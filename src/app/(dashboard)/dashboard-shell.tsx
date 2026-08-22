@@ -86,6 +86,23 @@ export function DashboardShell({
     router.push("/login")
     router.refresh()
   }, [router])
+
+  // `TopNav`'s global search box previously had no wiring at all — not even
+  // `onSearchChange` was passed here, so typing and pressing Enter did
+  // nothing. Transactions is the one page with a real search implementation
+  // today (merchant/notes, `transaction-table.tsx`'s own `search` filter);
+  // this box is rendered on every authenticated page, so submitting it
+  // navigates there with `?search=` rather than trying to filter in place —
+  // `transactions/page.tsx` reads that param to seed the table's existing
+  // search state on load.
+  const handleSearchSubmit = React.useCallback(
+    (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed) return
+      router.push(`/transactions?search=${encodeURIComponent(trimmed)}`)
+    },
+    [router],
+  )
   // See this file's own top JSDoc "Bug fix" note for the full reasoning.
   const lastMobileNavOpenTriggerRef = React.useRef<HTMLElement | null>(null)
 
@@ -112,6 +129,7 @@ export function DashboardShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <TopNav
           user={user}
+          onSearchSubmit={handleSearchSubmit}
           notificationBell={notificationBell}
           mobileNavOpen={mobileNavOpen}
           onMobileNavOpenChange={setMobileNavOpen}

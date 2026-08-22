@@ -102,6 +102,12 @@ export interface TransactionTableProps {
    * `key` on every click, so this never needs to react to prop changes
    * itself). */
   jumpToUncategorized?: boolean
+  /** Seeds the merchant/notes search filter on mount — how
+   * `dashboard-shell.tsx`'s global TopNav search box (previously entirely
+   * unwired) reaches this table's own search implementation via
+   * `?search=` on `/transactions`. Only read on mount, the same convention
+   * `jumpToUncategorized` already establishes. */
+  initialSearch?: string
   onEdit: (transaction: Transaction) => void
   onSplit: (transaction: Transaction) => void
 }
@@ -151,6 +157,7 @@ export function TransactionTable({
   categories,
   pendingSuggestions,
   jumpToUncategorized = false,
+  initialSearch,
   onEdit,
   onSplit,
 }: TransactionTableProps) {
@@ -164,8 +171,8 @@ export function TransactionTable({
   const [categoryId, setCategoryId] = React.useState<string | undefined>(
     jumpToUncategorized ? UNCATEGORIZED_CATEGORY_ID : undefined,
   )
-  const [searchInput, setSearchInput] = React.useState("")
-  const [search, setSearch] = React.useState("")
+  const [searchInput, setSearchInput] = React.useState(initialSearch ?? "")
+  const [search, setSearch] = React.useState(initialSearch ?? "")
   const [dateFrom, setDateFrom] = React.useState("")
   const [dateTo, setDateTo] = React.useState("")
   // Kept as a single state object (rather than separate sortBy/sortDir

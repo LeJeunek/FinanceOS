@@ -42,12 +42,25 @@ import { TransactionsClient } from "./transactions-client"
  * `categorization.ts`'s own JSDoc on why the `importBatchId` scoping named in
  * the API contract isn't implemented yet (no column exists to group
  * transactions by import batch).
+ *
+ * `searchParams.search` (Next.js 15's `searchParams` page prop is a
+ * `Promise` — see `budgeting/page.tsx`'s own note on this) seeds
+ * `TransactionTable`'s existing merchant/notes search filter on load — how
+ * `dashboard-shell.tsx`'s global TopNav search box (previously entirely
+ * unwired) reaches this page's own already-working search implementation
+ * rather than duplicating it.
  */
-export default async function TransactionsPage() {
+export interface TransactionsPageProps {
+  searchParams: Promise<{ search?: string }>
+}
+
+export default async function TransactionsPage({ searchParams }: TransactionsPageProps) {
   const user = await getCurrentUser()
   if (!user) {
     redirect("/login")
   }
+
+  const resolvedSearchParams = await searchParams
 
   const categories = await getCategories(user.id)
 
@@ -66,6 +79,7 @@ export default async function TransactionsPage() {
       categories={categories}
       categoryUsageCounts={categoryUsageCounts}
       pendingSuggestions={pendingSuggestions}
+      initialSearch={resolvedSearchParams.search}
     />
   )
 }
