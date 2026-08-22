@@ -29,7 +29,9 @@ import {
 import { removeReceipt as removeReceiptForUser } from "@/features/transactions/server/receipts"
 import {
   requestManualSuggestion,
+  generateAutomaticSuggestionsForUser,
   type ManualSuggestionResult,
+  type CategorizeUserResult,
 } from "@/features/transactions/server/categorization"
 import {
   adjustBalanceForTransactionAmount,
@@ -771,6 +773,55 @@ export async function requestCategorySuggestion(
   }
 
   const result = await requestManualSuggestion(user.id, transactionId)
+  return ok(result)
+}
+
+/** Minimum time between successive bulk "suggest categories" requests for
+ * one user — prevents spam-clicking from burning through model calls.
+ * Reuses `generateAutomaticSuggestionsForUser`'s own existing per-invocation
+ * cap (`MAX_BATCHES_PER_USER_PER_INVOCATION` batches of
+ * `CATEGORIZATION_BATCH_SIZE` transactions each, `lib/ai/rate-limit.ts`), so
+ * this cooldown is the only additional guard this on-demand trigger needs —
+ * a longer interval than the single-transaction "reconsider" cooldown
+ * (`RECONSIDER_MIN_INTERVAL_MS`) since one call here can cost up to a full
+ * batch of model calls instead of one. */
+const BULK_SUGGEST_MIN_INTERVAL_MS = 60_000
+
+/**
+ * User-triggered "suggest categories for every currently-Uncategorized
+ * transaction" action — the bulk counterpart to `requestCategorySuggestion`'s
+ * single-transaction "reconsider" path. Delegates entirely to
+ * `generateAutomaticSuggestionsForUser` (the same batch-generation logic the
+ * categorization cron already runs on a schedule), so a user doesn't have to
+ * wait for the next cron invocation to get suggestions for a backlog of
+ * Uncategorized transactions (e.g. right after a CSV import).
+ *
+ * Rate-limited per-user via `BULK_SUGGEST_MIN_INTERVAL_MS` above, checked
+ * against this user's most recent AUTOMATIC-source suggestion — the same
+ * plain read-then-check pattern `requestCategorySuggestion` already uses for
+ * its own single-transaction cooldown (this action's concurrency profile is
+ * identical: one authenticated user, acting on their own data).
+ * `generateAutomaticSuggestionsForUser` already bounds the actual work done
+ * per call (`MAX_BATCHES_PER_USER_PER_INVOCATION` batches), so a backlog
+ * larger than one batch is processed a batch at a time across successive
+ * clicks, exactly like it is across successive cron invocations.
+ */
+export async function requestBulkCategorySuggestions(): Promise<
+  ApiResult<CategorizeUserResult>
+> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const lastBulkSuggestion = await db.categorySuggestion.findFirst({
+    where: { userId: user.id, source: "AUTOMATIC" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  })
+  if (!canRefreshNow(lastBulkSuggestion?.createdAt ?? null, BULK_SUGGEST_MIN_INTERVAL_MS)) {
+    return fail("Please wait a moment before requesting suggestions again")
+  }
+
+  const result = await generateAutomaticSuggestionsForUser(user.id)
   return ok(result)
 }
 

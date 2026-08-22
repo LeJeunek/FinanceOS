@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Plus, Settings2, Sparkles, Upload } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { useAccounts } from "@/features/accounts/hooks/use-accounts"
@@ -13,6 +14,7 @@ import { SplitDialog } from "@/features/transactions/components/split-dialog"
 import { TransactionForm } from "@/features/transactions/components/transaction-form"
 import { TransactionTable } from "@/features/transactions/components/transaction-table"
 import type { PendingCategorySuggestion } from "@/features/transactions/server/categorization"
+import { requestBulkCategorySuggestions } from "@/features/transactions/server/actions"
 import type { Transaction } from "@/features/transactions/types"
 
 /**
@@ -66,6 +68,47 @@ export function TransactionsClient({
   const [isImportOpen, setIsImportOpen] = React.useState(false)
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = React.useState(false)
   const [uncategorizedJumpCount, setUncategorizedJumpCount] = React.useState(0)
+  const [isBulkSuggesting, setIsBulkSuggesting] = React.useState(false)
+
+  /**
+   * Bulk "suggest categories for all Uncategorized transactions" — calls
+   * `requestBulkCategorySuggestions`, which delegates to the same batch
+   * generation logic the categorization cron already runs on a schedule (see
+   * that Server Action's own doc comment). Never throws — every outcome
+   * (rate-limited, zero eligible transactions, or N suggestions generated)
+   * is surfaced as a toast, matching `TransactionTable`'s own
+   * `handleRequestSuggestion` fallback contract for the single-transaction
+   * "reconsider" action.
+   */
+  const handleBulkSuggest = React.useCallback(async () => {
+    setIsBulkSuggesting(true)
+    try {
+      const result = await requestBulkCategorySuggestions()
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      if (result.data.processed === 0) {
+        toast.success("No uncategorized transactions need a suggestion right now.")
+        return
+      }
+      if (result.data.suggested === 0) {
+        toast.success(
+          `Checked ${result.data.processed} uncategorized transaction${result.data.processed === 1 ? "" : "s"} — no confident category match found.`,
+        )
+        return
+      }
+      toast.success(
+        `Suggested categories for ${result.data.suggested} of ${result.data.processed} uncategorized transactions.`,
+      )
+      // Re-runs page.tsx's `getPendingSuggestions` read, which is how the
+      // new suggestions reach `TransactionTable`'s `pendingSuggestions` prop
+      // (and the "Review N suggestions" button below).
+      router.refresh()
+    } finally {
+      setIsBulkSuggesting(false)
+    }
+  }, [router])
 
   // Categories/usage counts are Server-Component-sourced (no client hook
   // exists for this feature) — `router.refresh()` re-runs page.tsx's fetch,
@@ -95,6 +138,10 @@ export function TransactionsClient({
               {pendingSuggestions.length === 1 ? "" : "s"}
             </Button>
           )}
+          <Button variant="outline" onClick={handleBulkSuggest} disabled={isBulkSuggesting}>
+            <Sparkles className="size-4" aria-hidden="true" />
+            {isBulkSuggesting ? "Suggesting..." : "Suggest categories"}
+          </Button>
           <Button variant="outline" onClick={() => setIsCategoryManagerOpen(true)}>
             <Settings2 className="size-4" aria-hidden="true" />
             Manage categories
