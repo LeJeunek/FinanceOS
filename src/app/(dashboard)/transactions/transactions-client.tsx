@@ -2,13 +2,14 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Settings2, Sparkles, Upload } from "lucide-react"
+import { FileText, Plus, Settings2, Sparkles, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { useAccounts } from "@/features/accounts/hooks/use-accounts"
 import type { Category } from "@/features/categories/types"
 import { CategoryManagerDialog } from "@/features/transactions/components/category-manager-dialog"
+import { StatementConverterDialog } from "@/features/statement-import/components/statement-converter-dialog"
 import { ImportDialog } from "@/features/transactions/components/import-dialog"
 import { SplitDialog } from "@/features/transactions/components/split-dialog"
 import { TransactionForm } from "@/features/transactions/components/transaction-form"
@@ -66,6 +67,7 @@ export function TransactionsClient({
   const [formState, setFormState] = React.useState<FormState>(null)
   const [splittingTransaction, setSplittingTransaction] = React.useState<Transaction | null>(null)
   const [isImportOpen, setIsImportOpen] = React.useState(false)
+  const [isConverterOpen, setIsConverterOpen] = React.useState(false)
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = React.useState(false)
   const [uncategorizedJumpCount, setUncategorizedJumpCount] = React.useState(0)
   const [isBulkSuggesting, setIsBulkSuggesting] = React.useState(false)
@@ -88,27 +90,39 @@ export function TransactionsClient({
         toast.error(result.error)
         return
       }
-      if (result.data.processed === 0) {
-        toast.success("No uncategorized transactions need a suggestion right now.")
-        return
-      }
-      if (result.data.suggested === 0) {
+
+      if (result.data.suggested > 0) {
+        toast.success(
+          `Suggested categories for ${result.data.suggested} of ${result.data.processed} uncategorized transactions.`,
+        )
+      } else if (result.data.processed > 0) {
         toast.success(
           `Checked ${result.data.processed} uncategorized transaction${result.data.processed === 1 ? "" : "s"} — no confident category match found.`,
         )
-        return
+      } else if (pendingSuggestions.length === 0) {
+        toast.success("No uncategorized transactions need a suggestion right now.")
       }
-      toast.success(
-        `Suggested categories for ${result.data.suggested} of ${result.data.processed} uncategorized transactions.`,
-      )
-      // Re-runs page.tsx's `getPendingSuggestions` read, which is how the
-      // new suggestions reach `TransactionTable`'s `pendingSuggestions` prop
-      // (and the "Review N suggestions" button below).
+      // Otherwise: nothing new to generate (every currently-Uncategorized
+      // transaction already has a PENDING suggestion — e.g. from the cron
+      // job running on its own schedule), but suggestions DO already exist.
+      // A toast alone is easy to miss and reads as "the button did nothing"
+      // — jumping straight to the review view below is what actually
+      // surfaces them, matching what "Suggest categories" implicitly
+      // promises regardless of whether this exact click is what generated
+      // them.
+
+      // Re-runs page.tsx's `getPendingSuggestions` read, which is how any
+      // newly-generated suggestions reach `TransactionTable`'s
+      // `pendingSuggestions` prop.
       router.refresh()
+
+      if (result.data.suggested > 0 || pendingSuggestions.length > 0) {
+        setUncategorizedJumpCount((count) => count + 1)
+      }
     } finally {
       setIsBulkSuggesting(false)
     }
-  }, [router])
+  }, [router, pendingSuggestions.length])
 
   // Categories/usage counts are Server-Component-sourced (no client hook
   // exists for this feature) — `router.refresh()` re-runs page.tsx's fetch,
@@ -146,6 +160,10 @@ export function TransactionsClient({
             <Settings2 className="size-4" aria-hidden="true" />
             Manage categories
           </Button>
+          <Button variant="outline" onClick={() => setIsConverterOpen(true)}>
+            <FileText className="size-4" aria-hidden="true" />
+            PDF to CSV
+          </Button>
           <Button variant="outline" onClick={() => setIsImportOpen(true)}>
             <Upload className="size-4" aria-hidden="true" />
             Import CSV
@@ -182,6 +200,13 @@ export function TransactionsClient({
       />
 
       <ImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} accounts={accounts} />
+
+      <StatementConverterDialog
+        open={isConverterOpen}
+        onOpenChange={setIsConverterOpen}
+        accounts={accounts}
+        categoryNames={categories.map((category) => category.name)}
+      />
 
       <CategoryManagerDialog
         open={isCategoryManagerOpen}
