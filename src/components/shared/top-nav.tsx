@@ -70,6 +70,17 @@ export interface TopNavProps {
   searchPlaceholder?: string
   /** Presentational only — forwards the raw input value, never calls an API. */
   onSearchChange?: (value: string) => void
+  /**
+   * Fired when Enter is pressed in the search box — distinct from
+   * `onSearchChange`'s per-keystroke forwarding, since this box is global
+   * (rendered by every authenticated page, not just Transactions) and has no
+   * search results surface of its own to filter live. The real authenticated
+   * shell (`dashboard-shell.tsx`) wires this to navigate to
+   * `/transactions?search=<value>`, the one page with an actual search
+   * implementation today — previously this box had no wiring at all (neither
+   * `onSearchChange` nor this), so typing and pressing Enter did nothing.
+   */
+  onSearchSubmit?: (value: string) => void
   /** Override the default `<ThemeToggle />` slot if needed. */
   themeToggle?: React.ReactNode
   /** Notification bell slot, rendered between the theme toggle and the user
@@ -156,6 +167,7 @@ export function TopNav({
   onSignOut,
   searchPlaceholder = "Search transactions, accounts...",
   onSearchChange,
+  onSearchSubmit,
   themeToggle,
   notificationBell,
   mobileNavOpen: controlledMobileNavOpen,
@@ -224,6 +236,11 @@ export function TopNav({
           aria-label="Search"
           className="pl-8"
           onChange={(event) => onSearchChange?.(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              onSearchSubmit?.(event.currentTarget.value)
+            }
+          }}
         />
       </div>
 

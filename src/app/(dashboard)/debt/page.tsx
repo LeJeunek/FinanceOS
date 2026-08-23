@@ -7,6 +7,7 @@ import { getAccounts } from "@/features/accounts/server/service"
 import type { Account } from "@/features/accounts/types"
 import { AddDebtButton } from "@/features/debt/components/debt-form"
 import { DebtList } from "@/features/debt/components/debt-list"
+import { LumpSumAdvisor } from "@/features/debt/components/lump-sum-advisor"
 import { StrategyComparison } from "@/features/debt/components/strategy-comparison"
 import { TotalActiveDebtCard } from "@/features/debt/components/total-active-debt-card"
 import { getUserPreference } from "@/features/settings/server/service"
@@ -111,6 +112,15 @@ export default async function DebtPage() {
 
           {comparisonDebts.length > 0 && (
             <StrategyComparison debts={comparisonDebts} />
+          )}
+
+          {/* One-time windfall allocation — a different question from
+              StrategyComparison's recurring-extra-payment model; see
+              `features/debt/lump-sum.ts` for why the two are separate. Same
+              client-side-only contract: takes the active debts as a prop and
+              recomputes locally. */}
+          {comparisonDebts.length > 0 && (
+            <LumpSumAdvisor debts={comparisonDebts} />
           )}
 
           <Tabs defaultValue="active">

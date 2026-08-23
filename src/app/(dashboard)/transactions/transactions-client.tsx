@@ -52,6 +52,9 @@ export interface TransactionsClientProps {
   categories: Category[]
   categoryUsageCounts: Record<string, number>
   pendingSuggestions: PendingCategorySuggestion[]
+  /** Seeds `TransactionTable`'s own search filter — see `page.tsx`'s JSDoc
+   * on `searchParams.search` for where this comes from. */
+  initialSearch?: string
 }
 
 type FormState = { mode: "create" } | { mode: "edit"; transaction: Transaction } | null
@@ -60,6 +63,7 @@ export function TransactionsClient({
   categories,
   categoryUsageCounts,
   pendingSuggestions,
+  initialSearch,
 }: TransactionsClientProps) {
   const router = useRouter()
   const { data: accounts = [] } = useAccounts()
@@ -176,10 +180,11 @@ export function TransactionsClient({
       </div>
 
       <TransactionTable
-        key={uncategorizedJumpCount}
+        key={`${uncategorizedJumpCount}-${initialSearch ?? ""}`}
         categories={categories}
         pendingSuggestions={pendingSuggestions}
         jumpToUncategorized={uncategorizedJumpCount > 0}
+        initialSearch={initialSearch}
         onEdit={(transaction) => setFormState({ mode: "edit", transaction })}
         onSplit={(transaction) => setSplittingTransaction(transaction)}
       />
