@@ -21,6 +21,15 @@ import { extractStatementText } from "@/features/statement-import/server/pdf-tex
  * requires an authenticated session, since PDF parsing is unauthenticated
  * compute a public endpoint would happily burn on anyone's uploads.
  */
+/** PDF parsing needs real Node APIs (`pdfjs-dist` is not Edge-compatible),
+ * so this route is pinned to the Node runtime rather than relying on the
+ * default. */
+export const runtime = "nodejs"
+
+/** A large multi-page statement can take longer than the default serverless
+ * limit to parse. 60s is the ceiling on Vercel's Hobby plan. */
+export const maxDuration = 60
+
 export async function POST(request: Request): Promise<NextResponse> {
   const user = await getCurrentUser()
   if (!user) {

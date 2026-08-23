@@ -1,4 +1,4 @@
-import { PDFParse } from "pdf-parse"
+import type { PDFParse as PDFParseType } from "pdf-parse"
 
 import { ok, fail, type ApiResult } from "@/lib/api-response"
 
@@ -59,8 +59,18 @@ export async function extractStatementText(
     return fail(`That PDF is too large — the maximum statement size is ${maxMb} MB`)
   }
 
-  let parser: PDFParse | undefined
+  let parser: PDFParseType | undefined
   try {
+    // Imported here rather than at module scope on purpose. `pdfjs-dist`
+    // (which pdf-parse wraps) does real work at import time and can fail in a
+    // serverless runtime; a top-level import turns that into a 500 on the
+    // whole route — before the auth check, and outside this try/catch, so the
+    // caller gets Next's HTML error page instead of a usable message. Loading
+    // it inside the guarded path means a failure degrades into the same clean
+    // `fail(...)` result as a corrupt PDF. Paired with
+    // `serverExternalPackages: ["pdf-parse"]` in next.config.ts, which is what
+    // actually keeps its worker/font assets reachable in the deployed bundle.
+    const { PDFParse } = await import("pdf-parse")
     parser = new PDFParse({ data })
     const result = await parser.getText()
     const text = result.text ?? ""
