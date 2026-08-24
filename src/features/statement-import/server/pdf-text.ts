@@ -1,6 +1,7 @@
 import type { PDFParse as PDFParseType } from "pdf-parse"
 
 import { ok, fail, type ApiResult } from "@/lib/api-response"
+import { ensurePdfDomGlobals } from "@/features/statement-import/server/pdf-dom-shim"
 
 /**
  * Server-side PDF text extraction, backing
@@ -106,6 +107,11 @@ export async function extractStatementText(
     // `fail(...)` result as a corrupt PDF. Paired with
     // `serverExternalPackages: ["pdf-parse"]` in next.config.ts, which is what
     // actually keeps its worker/font assets reachable in the deployed bundle.
+    // Must precede the import: pdfjs reads these globals while its own
+    // module body evaluates, and in a bundled serverless runtime its
+    // self-polyfill cannot resolve them. See `pdf-dom-shim.ts`.
+    ensurePdfDomGlobals()
+
     const { PDFParse } = await import("pdf-parse")
 
     // pdfjs takes ownership of the typed array it is handed and detaches the
