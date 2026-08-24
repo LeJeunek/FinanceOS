@@ -7,6 +7,7 @@ import {
   PASSWORD_INCORRECT,
   PASSWORD_REQUIRED,
   SCANNED_PDF,
+  TEXT_EXTRACTION_UNAVAILABLE,
 } from "@/features/statement-import/server/pdf-text"
 import { convertStatementText, revalidate, summarize } from "@/features/statement-import/pipeline"
 import type {
@@ -67,6 +68,9 @@ export interface UseStatementConversion {
   /** Set when the PDF is encrypted: the dialog shows a password prompt.
    * `true` once a supplied password has been rejected. */
   passwordWasWrong: boolean
+  /** True when the visual step is being offered because the PDF library
+   * failed to load, rather than because the file is a scan. */
+  textExtractionUnavailable: boolean
   convert: (file: File, options?: { password?: string; vision?: boolean }) => Promise<void>
   updateDraft: (id: string, patch: Partial<DraftTransaction>) => void
   setIncluded: (id: string, included: boolean) => void
@@ -103,6 +107,7 @@ export function useStatementConversion(
   const [drafts, setDrafts] = React.useState<DraftTransaction[]>([])
   const [includedIds, setIncludedIds] = React.useState<ReadonlySet<string>>(new Set())
   const [passwordWasWrong, setPasswordWasWrong] = React.useState(false)
+  const [textExtractionUnavailable, setTextExtractionUnavailable] = React.useState(false)
 
   const convert = React.useCallback(
     async (file: File, options: { password?: string; vision?: boolean } = {}) => {
@@ -132,7 +137,8 @@ export function useStatementConversion(
         // The PDF has no text layer. Reading it visually is possible but
         // sends the document to a model, so the user opts in explicitly
         // rather than having it happen silently on their bank statement.
-        if (message === SCANNED_PDF) {
+        if (message === SCANNED_PDF || message === TEXT_EXTRACTION_UNAVAILABLE) {
+          setTextExtractionUnavailable(message === TEXT_EXTRACTION_UNAVAILABLE)
           setStage("scanned")
           return
         }
@@ -185,6 +191,7 @@ export function useStatementConversion(
   const reset = React.useCallback(() => {
     setStage("idle")
     setPasswordWasWrong(false)
+    setTextExtractionUnavailable(false)
     setError(null)
     setResult(null)
     setDrafts([])
@@ -216,6 +223,7 @@ export function useStatementConversion(
     includedDrafts,
     hasBlockingErrors,
     passwordWasWrong,
+    textExtractionUnavailable,
     convert,
     updateDraft,
     setIncluded,

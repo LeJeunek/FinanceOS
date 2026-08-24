@@ -350,18 +350,36 @@ export function StatementConverterDialog({
         {conversion.stage === "scanned" && (
           <div className="grid gap-3">
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
-              <p className="font-medium">This statement is a scan, not a text PDF.</p>
-              <p className="mt-1 text-muted-foreground">
-                <span className="font-medium text-foreground">{fileName}</span> contains page
-                images with no text layer, so it cannot be read directly. The pages can be read
-                visually instead — this sends the statement to the same AI provider this app
-                already uses for category suggestions. You will still review and correct every
-                row before anything is imported.
+              <p className="font-medium">
+                {conversion.textExtractionUnavailable
+                  ? "This statement could not be read directly."
+                  : "This statement is a scan, not a text PDF."}
               </p>
               <p className="mt-1 text-muted-foreground">
-                Prefer not to? Download the original PDF from your bank&apos;s online banking
-                instead — those have a text layer and are read locally.
+                {conversion.textExtractionUnavailable ? (
+                  <>
+                    The PDF reader is not available on the server right now, which is a problem
+                    on our side and nothing to do with{" "}
+                    <span className="font-medium text-foreground">{fileName}</span>. The pages can
+                    still be read visually instead.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium text-foreground">{fileName}</span> contains page
+                    images with no text layer, so it cannot be read directly. The pages can be
+                    read visually instead.
+                  </>
+                )}{" "}
+                This sends the statement to the same AI provider this app already uses for
+                category suggestions. You will still review and correct every row before
+                anything is imported.
               </p>
+              {!conversion.textExtractionUnavailable && (
+                <p className="mt-1 text-muted-foreground">
+                  Prefer not to? Download the original PDF from your bank&apos;s online banking
+                  instead — those have a text layer and are read locally.
+                </p>
+              )}
             </div>
             <div className="flex gap-2">
               <Button

@@ -54,6 +54,11 @@ export const PASSWORD_INCORRECT = "PASSWORD_INCORRECT"
 /** The PDF carries no text layer — it is a scan or photo of a statement.
  * The dialog turns this into the offer to read the pages visually. */
 export const SCANNED_PDF = "SCANNED_PDF"
+/** The PDF library itself could not be loaded in this runtime, so the text
+ * layer is unreadable here for reasons that have nothing to do with the
+ * user's file. Distinct from SCANNED_PDF so the dialog never tells someone
+ * their perfectly good PDF is a scan. */
+export const TEXT_EXTRACTION_UNAVAILABLE = "TEXT_EXTRACTION_UNAVAILABLE"
 
 /** pdf-parse inserts a `-- N of M --` separator per page whether or not the
  * page contains anything, so those must be discounted before deciding a
@@ -188,6 +193,17 @@ function describeExtractionFailure(error: unknown, passwordWasSupplied: boolean)
 
   if (name === "ResponseException" || name === "MissingPDFException") {
     return "The PDF could not be loaded in full — the upload may have been truncated. Try again."
+  }
+
+  // A failure to load the PDF library says nothing about the user's file.
+  // Treated as its own condition so the converter can still offer the visual
+  // path instead of dead-ending on an environment problem the user cannot do
+  // anything about.
+  if (
+    /failed to load external module|DOMMatrix|Path2D|ImageData|Cannot find module/i.test(message)
+  ) {
+    console.error("[statement-import] PDF library unavailable in this runtime:", error)
+    return TEXT_EXTRACTION_UNAVAILABLE
   }
 
   // Anything else is unexpected. Log it so it lands in the server's runtime
