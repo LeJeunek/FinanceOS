@@ -3,6 +3,11 @@
 import * as React from "react"
 
 import { statementTextExtractor } from "@/features/statement-import/extraction/http-extractor"
+import {
+  PASSWORD_INCORRECT,
+  PASSWORD_REQUIRED,
+  SCANNED_PDF,
+} from "@/features/statement-import/server/pdf-text"
 import { convertStatementText, revalidate, summarize } from "@/features/statement-import/pipeline"
 import type {
   ConversionResult,
@@ -26,6 +31,8 @@ export type ConversionStage =
   | "categorizing"
   | "validating"
   | "review"
+  | "password"
+  | "scanned"
   | "error"
 
 export const STAGE_MESSAGES: Record<ConversionStage, string> = {
@@ -35,6 +42,8 @@ export const STAGE_MESSAGES: Record<ConversionStage, string> = {
   categorizing: "Categorizing transactions...",
   validating: "Validating transactions...",
   review: "",
+  password: "",
+  scanned: "",
   error: "",
 }
 
@@ -55,7 +64,10 @@ export interface UseStatementConversion {
   includedDrafts: DraftTransaction[]
   /** True when a selected row still has a validation error. */
   hasBlockingErrors: boolean
-  convert: (file: File) => Promise<void>
+  /** Set when the PDF is encrypted: the dialog shows a password prompt.
+   * `true` once a supplied password has been rejected. */
+  passwordWasWrong: boolean
+  convert: (file: File, options?: { password?: string; vision?: boolean }) => Promise<void>
   updateDraft: (id: string, patch: Partial<DraftTransaction>) => void
   setIncluded: (id: string, included: boolean) => void
   reset: () => void
@@ -90,9 +102,10 @@ export function useStatementConversion(
   const [result, setResult] = React.useState<ConversionResult | null>(null)
   const [drafts, setDrafts] = React.useState<DraftTransaction[]>([])
   const [includedIds, setIncludedIds] = React.useState<ReadonlySet<string>>(new Set())
+  const [passwordWasWrong, setPasswordWasWrong] = React.useState(false)
 
   const convert = React.useCallback(
-    async (file: File) => {
+    async (file: File, options: { password?: string; vision?: boolean } = {}) => {
       setError(null)
       setResult(null)
       setDrafts([])
@@ -101,10 +114,30 @@ export function useStatementConversion(
 
       let text: string
       try {
-        const extracted = await statementTextExtractor.extract(file)
+        const extracted = await statementTextExtractor.extract(file, options)
         text = extracted.text
+        setPasswordWasWrong(false)
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not read that PDF")
+        const message = caught instanceof Error ? caught.message : "Could not read that PDF"
+
+        // An encrypted statement is a normal situation with a normal fix, not
+        // a failure — the dialog asks for the password and retries instead of
+        // dead-ending on an error screen.
+        if (message === PASSWORD_REQUIRED || message === PASSWORD_INCORRECT) {
+          setPasswordWasWrong(message === PASSWORD_INCORRECT)
+          setStage("password")
+          return
+        }
+
+        // The PDF has no text layer. Reading it visually is possible but
+        // sends the document to a model, so the user opts in explicitly
+        // rather than having it happen silently on their bank statement.
+        if (message === SCANNED_PDF) {
+          setStage("scanned")
+          return
+        }
+
+        setError(message)
         setStage("error")
         return
       }
@@ -151,6 +184,7 @@ export function useStatementConversion(
 
   const reset = React.useCallback(() => {
     setStage("idle")
+    setPasswordWasWrong(false)
     setError(null)
     setResult(null)
     setDrafts([])
@@ -181,6 +215,7 @@ export function useStatementConversion(
     includedIds,
     includedDrafts,
     hasBlockingErrors,
+    passwordWasWrong,
     convert,
     updateDraft,
     setIncluded,

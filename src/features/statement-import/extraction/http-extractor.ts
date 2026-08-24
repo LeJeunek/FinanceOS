@@ -1,4 +1,5 @@
 import type {
+  ExtractOptions,
   ExtractedStatement,
   StatementTextExtractor,
 } from "@/features/statement-import/extraction/types"
@@ -20,9 +21,11 @@ import type { ApiResult } from "@/lib/api-response"
  * rather than mapping status codes to copy of its own.
  */
 export class HttpStatementTextExtractor implements StatementTextExtractor {
-  async extract(file: File): Promise<ExtractedStatement> {
+  async extract(file: File, options: ExtractOptions = {}): Promise<ExtractedStatement> {
     const formData = new FormData()
     formData.set("file", file)
+    if (options.password) formData.set("password", options.password)
+    if (options.vision) formData.set("mode", "vision")
 
     let response: Response
     try {

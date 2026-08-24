@@ -176,9 +176,14 @@ export function ReviewTable({
                     CELL_INPUT,
                     "text-right tabular-nums",
                     amountError && INVALID_CELL,
-                    draft.amount !== null && draft.amount < 0
-                      ? "text-foreground"
-                      : "text-emerald-700 dark:text-emerald-400",
+                    // Green means "money in" and nothing else. Guard on a
+                    // strictly positive amount rather than "not negative":
+                    // the earlier `amount < 0 ? normal : green` test painted
+                    // an unparsed (null) or zero amount green too, so a row
+                    // whose amount failed to read looked like income.
+                    draft.amount !== null && draft.amount > 0
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-foreground",
                   )}
                   onChange={(event) => {
                     const raw = event.target.value.trim()

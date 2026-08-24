@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { fail } from "@/lib/api-response"
 import { extractStatementText } from "@/features/statement-import/server/pdf-text"
+import { transcribeStatement } from "@/features/statement-import/server/vision-text"
 
 /**
  * `POST /api/transactions/statement/extract` (multipart/form-data with a
@@ -50,6 +51,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(fail("A PDF file is required"), { status: 400 })
   }
 
+  // Optional: the PDF's own open password, for banks that issue encrypted
+  // statements. Used only to decrypt this one request's bytes and never
+  // stored, logged, or echoed back.
+  const passwordField = formData.get("password")
+  const password =
+    typeof passwordField === "string" && passwordField.length > 0 ? passwordField : undefined
+
   let data: Uint8Array
   try {
     data = new Uint8Array(await file.arrayBuffer())
@@ -57,6 +65,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(fail("Could not read the uploaded file"), { status: 400 })
   }
 
-  const result = await extractStatementText(data, file.size)
+  // `mode=vision` is the explicit, user-confirmed fallback for a statement
+  // with no text layer. It is never chosen automatically: the text path runs
+  // first, reports SCANNED_PDF, and the user decides whether to have the
+  // pages read visually.
+  const result =
+    formData.get("mode") === "vision"
+      ? await transcribeStatement(data, file.size)
+      : await extractStatementText(data, file.size, password)
+
   return NextResponse.json(result, { status: result.success ? 200 : 400 })
 }

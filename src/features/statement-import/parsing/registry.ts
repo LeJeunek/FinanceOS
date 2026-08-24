@@ -1,5 +1,6 @@
 import { genericParser } from "@/features/statement-import/parsing/generic-parser"
 import { newHorizonsParser } from "@/features/statement-import/parsing/new-horizons-parser"
+import { transcriptParser } from "@/features/statement-import/parsing/transcript-parser"
 import type { StatementParser } from "@/features/statement-import/parsing/types"
 import type { StatementLine } from "@/features/statement-import/types"
 
@@ -17,6 +18,9 @@ import type { StatementLine } from "@/features/statement-import/types"
  * intended precedence is obvious when reading the file.
  */
 export const STATEMENT_PARSERS: readonly StatementParser[] = [
+  // Scores 1 on its own header and 0 otherwise, so a visually-read statement
+  // always routes here and nothing else ever does.
+  transcriptParser,
   newHorizonsParser,
   genericParser,
 ]

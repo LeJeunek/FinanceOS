@@ -43,16 +43,52 @@ export interface ExtractedStatementText {
 }
 
 /**
+ * Sentinel error strings the client reacts to programmatically, following the
+ * codebase's existing `fail("UNAUTHENTICATED")` convention rather than
+ * inventing a second response shape. `features/statement-import/components/
+ * statement-converter-dialog.tsx` maps these onto the password prompt.
+ */
+export const PASSWORD_REQUIRED = "PASSWORD_REQUIRED"
+export const PASSWORD_INCORRECT = "PASSWORD_INCORRECT"
+/** The PDF carries no text layer — it is a scan or photo of a statement.
+ * The dialog turns this into the offer to read the pages visually. */
+export const SCANNED_PDF = "SCANNED_PDF"
+
+/** pdf-parse inserts a `-- N of M --` separator per page whether or not the
+ * page contains anything, so those must be discounted before deciding a
+ * document has no text. */
+const PAGE_MARKER_PATTERN = /^--\s*\d+\s+of\s+\d+\s*--$/
+
+/** Whether a document yielded any genuine text, as opposed to nothing but
+ * pdf-parse's page furniture. */
+export function hasRealText(text: string): boolean {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .some((line) => line.length > 0 && !PAGE_MARKER_PATTERN.test(line))
+}
+
+/**
  * Extracts text from statement PDF bytes.
  *
  * Returns a `fail` result (never throws) for every expected failure —
  * oversized file, corrupt/encrypted PDF, image-only scan — so the Route
  * Handler stays a thin wrapper and the user gets an actionable message
  * instead of a 500.
+ *
+ * **On error reporting.** An earlier version of this function collapsed every
+ * thrown error into one "corrupted, password-protected, or not a PDF"
+ * message. That was actively harmful: a password-protected statement (which
+ * plenty of banks issue by default) is a completely different problem from a
+ * damaged file, and the merged message made a routine, fixable situation look
+ * like a bug in the converter. Each failure mode pdfjs distinguishes is now
+ * reported distinctly, and anything genuinely unexpected carries its
+ * underlying message so a real defect is diagnosable instead of disguised.
  */
 export async function extractStatementText(
   data: Uint8Array,
   fileSizeBytes: number,
+  password?: string,
 ): Promise<ApiResult<ExtractedStatementText>> {
   if (fileSizeBytes > MAX_STATEMENT_FILE_SIZE_BYTES) {
     const maxMb = (MAX_STATEMENT_FILE_SIZE_BYTES / (1024 * 1024)).toFixed(0)
@@ -71,17 +107,30 @@ export async function extractStatementText(
     // `serverExternalPackages: ["pdf-parse"]` in next.config.ts, which is what
     // actually keeps its worker/font assets reachable in the deployed bundle.
     const { PDFParse } = await import("pdf-parse")
-    parser = new PDFParse({ data })
+
+    // pdfjs takes ownership of the typed array it is handed and detaches the
+    // underlying ArrayBuffer, leaving the caller's `data` zero-length once
+    // this returns. Callers reasonably expect their own bytes to survive a
+    // read — notably the scanned-PDF path, which tries text extraction first
+    // and then re-sends the same document for visual transcription. Copying
+    // here keeps that ownership entirely inside this module.
+    const ownedData = data.slice()
+    parser = new PDFParse(password ? { data: ownedData, password } : { data: ownedData })
     const result = await parser.getText()
     const text = result.text ?? ""
 
-    if (text.trim().length === 0) {
-      // A PDF that yields no text is almost always a scan or a photo. Saying
-      // so is far more useful than "no transactions found", which would send
-      // the user looking for a parsing bug that isn't there.
-      return fail(
-        "No text could be read from this PDF. If it is a scanned or photographed statement, download the original PDF from your bank instead — this converter cannot read images.",
-      )
+    if (!hasRealText(text)) {
+      // An image-only PDF (a scan, or a "print to PDF" of a screenshot) has no
+      // text layer at all, so no amount of parser work can read it.
+      //
+      // The emptiness test must ignore pdf-parse's own `-- 1 of 2 --` page
+      // separators: it injects those regardless of page content, so a
+      // two-page scan comes back as ~32 characters of pure furniture and a
+      // naive `text.trim().length === 0` check passes. That bug is why a
+      // scanned statement previously fell through to "no transactions found"
+      // (or, once a later error fired, to a bogus "corrupted file" message)
+      // instead of saying what was actually wrong.
+      return fail(SCANNED_PDF)
     }
 
     if (text.length > MAX_EXTRACTED_CHARACTERS) {
@@ -89,13 +138,55 @@ export async function extractStatementText(
     }
 
     return ok({ text, pageCount: result.pages?.length ?? 0 })
-  } catch {
-    return fail(
-      "Could not read this PDF — it may be corrupted, password-protected, or not a PDF at all",
-    )
+  } catch (error) {
+    return fail(describeExtractionFailure(error, password !== undefined))
   } finally {
     // pdf-parse holds a pdfjs worker open per instance; not destroying it
     // leaks a worker per upload for the lifetime of the server process.
     await parser?.destroy().catch(() => undefined)
   }
+}
+
+/**
+ * Turns a thrown pdfjs error into a message that tells the user what to
+ * actually do about it.
+ *
+ * pdfjs reports its expected failures as named exception classes carrying a
+ * `name` property, which survives the bundler (unlike `instanceof` against
+ * classes imported from a package that may be loaded more than once), so the
+ * name is what is matched here.
+ *
+ * `PasswordException` covers two distinct cases that pdfjs separates by
+ * `code`: no password was supplied for an encrypted file (1,
+ * `NEED_PASSWORD`) and a supplied password was wrong (2, `INCORRECT_PASSWORD`).
+ * Both map to sentinels the dialog turns into a password prompt.
+ */
+function describeExtractionFailure(error: unknown, passwordWasSupplied: boolean): string {
+  const name = typeof error === "object" && error !== null && "name" in error
+    ? String((error as { name: unknown }).name)
+    : ""
+  const message = error instanceof Error ? error.message : String(error)
+
+  if (name === "PasswordException") {
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? Number((error as { code: unknown }).code)
+      : undefined
+    // Fall back on whether a password was already tried when `code` is absent.
+    if (code === 2 || (code === undefined && passwordWasSupplied)) return PASSWORD_INCORRECT
+    return PASSWORD_REQUIRED
+  }
+
+  if (name === "InvalidPDFException") {
+    return "This file is not a readable PDF. If you exported or renamed it, try downloading the original statement from your bank again."
+  }
+
+  if (name === "ResponseException" || name === "MissingPDFException") {
+    return "The PDF could not be loaded in full — the upload may have been truncated. Try again."
+  }
+
+  // Anything else is unexpected. Log it so it lands in the server's runtime
+  // logs, and surface the underlying message rather than a generic line that
+  // would leave a genuine defect looking like a bad file.
+  console.error("[statement-import] PDF extraction failed:", error)
+  return `Could not read this PDF: ${message || "unknown error"}`
 }

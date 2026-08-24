@@ -20,6 +20,14 @@ export interface ExtractedStatement {
   pageCount: number
 }
 
+export interface ExtractOptions {
+  /** The PDF's own open password, for encrypted statements. */
+  password?: string
+  /** Read the pages visually instead of from a text layer. Only for
+   * image-only PDFs, and only after the user opts in. */
+  vision?: boolean
+}
+
 export interface StatementTextExtractor {
   /**
    * Extracts text from one statement PDF.
@@ -28,6 +36,10 @@ export interface StatementTextExtractor {
    * document cannot be read at all, so the caller can distinguish "this PDF
    * is unreadable" from "this PDF has no transactions in it" — two problems
    * with completely different fixes for the user.
+   *
+   * `password` is the PDF's own open password, supplied only when the
+   * document is encrypted (some banks issue statements that way). It is used
+   * to decrypt that one request and is never persisted.
    */
-  extract(file: File): Promise<ExtractedStatement>
+  extract(file: File, options?: ExtractOptions): Promise<ExtractedStatement>
 }

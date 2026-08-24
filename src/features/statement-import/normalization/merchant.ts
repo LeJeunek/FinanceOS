@@ -25,10 +25,41 @@
 const PROCESSOR_PREFIX_PATTERN =
   /^(?:SQ|TST|SP|PY|PAYPAL|IC|EB|WL|CKE|DD|MSP|LS|POS|PPD)\s*\*+\s*/i
 
-/** Card-network transaction-type preambles some banks print before the
- * merchant (`"POS DEBIT WALGREENS"`, `"PURCHASE AUTHORIZED ON 08/21 SHELL"`). */
-const TRANSACTION_TYPE_PREFIX_PATTERN =
-  /^(?:POS\s+(?:DEBIT|CREDIT|PURCHASE)|DEBIT\s+CARD\s+PURCHASE|CHECK\s*CARD\s+PURCHASE|PURCHASE\s+AUTHORIZED(?:\s+ON\s+\d{1,2}[/-]\d{1,2})?|RECURRING\s+PAYMENT|ELECTRONIC\s+(?:WITHDRAWAL|DEPOSIT))\s+/i
+/**
+ * Card-network and posting-type preambles banks print before the merchant —
+ * `"POS DEBIT WALGREENS"`, `"VISA CHECK STARBUCKS STORE 10249"`,
+ * `"WITHDRAWAL POS #622100736300 SAMS CLUB"`,
+ * `"RECURRING WITHDRAWAL BILL PAYMENT #622900526385 HULU"`.
+ *
+ * An optional `#<digits>` terminal-or-trace number is consumed with the
+ * keyword, since it always trails the posting type rather than belonging to
+ * the merchant. The `\b` after the alternation is load-bearing: without it
+ * the bare `ACH` branch would bite into a merchant genuinely starting with
+ * those letters (turning "ACHIEVA" into "IEVA").
+ */
+const TRANSACTION_TYPE_PREFIX_PATTERN = new RegExp(
+  "^(?:RECURRING\\s+)?(?:" +
+    "VISA\\s+CHECK|CHECK\\s*CARD(?:\\s+PURCHASE)?|DEBIT\\s+CARD\\s+PURCHASE|" +
+    "POS\\s+(?:DEBIT|CREDIT|PURCHASE)|BILL\\s+PAYMENT|" +
+    "PURCHASE\\s+AUTHORIZED(?:\\s+ON\\s+\\d{1,2}[/-]\\d{1,2})?|" +
+    "ELECTRONIC\\s+(?:WITHDRAWAL|DEPOSIT)|RECURRING\\s+PAYMENT|" +
+    "WITHDRAWAL|DEPOSIT|POS|ACH" +
+    ")\\b(?:\\s*#\\d+)?\\s*",
+  "i",
+)
+
+/**
+ * ACH/bill-pay metadata appended after the merchant
+ * (`"CAPITAL ONE TYPE: CRCARDPMT ID: 9541719318 CO: CAPITAL ONE NAME: KYLE
+ * LEJEUNE"`). Everything from the first `KEY:` marker on is bookkeeping, not
+ * merchant — and it routinely contains the account holder's own name, which
+ * has no business being written into a merchant field.
+ */
+const TRAILING_METADATA_PATTERN = /\s+(?:TYPE|ID|CO|NAME|REF|MEMO|DESC|TRN)\s*:.*$/i
+
+/** A trailing two-letter state code, the last token of the location tail
+ * these statements print after the merchant. */
+const TRAILING_STATE_PATTERN = /\s+[A-Z]{2}\s*$/
 
 /** A run of 10+ digits — an authorization/reference/trace number, never a
  * meaningful part of a merchant name. Same threshold the existing
@@ -85,9 +116,14 @@ export function normalizeMerchant(raw: string): string {
   let text = raw.trim().replace(/\s+/g, " ")
   if (text.length === 0) return ""
 
+  // Cut the bookkeeping tail first, while its `KEY:` markers are still intact
+  // and before any other step can disturb them.
+  text = text.replace(TRAILING_METADATA_PATTERN, "").trim()
+
   // Prefix stripping runs before anything else — both patterns are anchored,
   // so they must see the string's real start. Applied repeatedly because
-  // some statements stack them ("POS DEBIT SQ *MERCHANT").
+  // some statements stack them ("WITHDRAWAL POS #622100736799 SAMS CLUB",
+  // "POS DEBIT SQ *MERCHANT").
   let previous: string
   do {
     previous = text
@@ -99,6 +135,40 @@ export function normalizeMerchant(raw: string): string {
   text = text.replace(PHONE_PATTERN, " ")
   text = text.replace(LONG_REFERENCE_PATTERN, " ")
   text = text.replace(/\s+/g, " ").trim()
+
+  // Strip the location tail these statements append after the merchant:
+  // "<merchant> <street/city> <STATE>". The state code is the reliable
+  // anchor, so it comes off first; the city word before it is then removed
+  // only when enough of the name survives to still identify the merchant.
+  if (TRAILING_STATE_PATTERN.test(text) && text.split(" ").length >= 2) {
+    text = text.replace(TRAILING_STATE_PATTERN, "").trim()
+
+    const words = text.split(" ")
+    if (words.length >= 3 && /^[A-Za-z]+$/.test(words[words.length - 1])) {
+      text = words.slice(0, -1).join(" ")
+    }
+  }
+
+  // Everything from the first bare numeric token onward is a street address
+  // or trace number, never part of the name ("CHEVRON 0389365 SPANISH FORT"
+  // -> "CHEVRON"). Position 0 is exempt so a merchant that legitimately opens
+  // with a number ("7 BREW COFFEE") keeps it. A store number written with a
+  // "#" is not bare, so it survives to the dedicated strip below.
+  const tokens = text.split(" ")
+  for (let index = 1; index < tokens.length; index++) {
+    if (/^\d+$/.test(tokens[index])) {
+      text = tokens.slice(0, index).join(" ")
+      break
+    }
+  }
+
+  // Contact details the bill-pay descriptor tacks on ("BALDWIN EMC
+  // MWHITE@BALDWI").
+  text = text
+    .split(" ")
+    .filter((token) => !token.includes("@"))
+    .join(" ")
+    .trim()
 
   text = text.replace(TRAILING_STORE_NUMBER_PATTERN, "").trim()
 

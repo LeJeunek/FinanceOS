@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Download, FileText, Loader2, Upload } from "lucide-react"
+import { Download, FileText, Loader2, ScanText, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -90,6 +91,8 @@ export function StatementConverterDialog({
   const [importSummary, setImportSummary] = React.useState<TransactionImportSummary | null>(null)
   const [reconciliation, setReconciliation] = React.useState<ReconciliationSuggestion | null>(null)
   const [importedNet, setImportedNet] = React.useState(0)
+  const [pendingFile, setPendingFile] = React.useState<File | null>(null)
+  const [pdfPassword, setPdfPassword] = React.useState("")
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
   // Pulled out of the `conversion` object so the reset effect below depends
@@ -106,6 +109,8 @@ export function StatementConverterDialog({
       setImportSummary(null)
       setReconciliation(null)
       setImportedNet(0)
+      setPendingFile(null)
+      setPdfPassword("")
     }
   }, [open, resetConversion])
 
@@ -118,6 +123,8 @@ export function StatementConverterDialog({
       return
     }
     setFileName(file.name)
+    setPendingFile(file)
+    setPdfPassword("")
     setImportSummary(null)
     setReconciliation(null)
     await conversion.convert(file)
@@ -293,6 +300,83 @@ export function StatementConverterDialog({
             <p className="text-sm" role="status">
               {STAGE_MESSAGES[conversion.stage]}
             </p>
+          </div>
+        )}
+
+        {/* ------- Encrypted statement: ask for the PDF's password ------- */}
+        {conversion.stage === "password" && (
+          <div className="grid gap-3">
+            <p className="text-sm">
+              <span className="font-medium">{fileName}</span> is password-protected.
+              {conversion.passwordWasWrong
+                ? " That password was not accepted — try again."
+                : " Enter the password your bank uses for this statement."}
+            </p>
+            <form
+              className="grid gap-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (pendingFile && pdfPassword) {
+                  void conversion.convert(pendingFile, { password: pdfPassword })
+                }
+              }}
+            >
+              <Label htmlFor="pdf-password">PDF password</Label>
+              <Input
+                id="pdf-password"
+                type="password"
+                autoComplete="off"
+                value={pdfPassword}
+                onChange={(event) => setPdfPassword(event.target.value)}
+                aria-invalid={conversion.passwordWasWrong}
+                className="max-w-72"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used only to open this file. It is never saved.
+              </p>
+              <div className="flex gap-2">
+                <Button type="submit" disabled={!pdfPassword}>
+                  Unlock
+                </Button>
+                <Button type="button" variant="ghost" onClick={conversion.reset}>
+                  Choose another file
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* ------- Image-only statement: offer to read it visually ------- */}
+        {conversion.stage === "scanned" && (
+          <div className="grid gap-3">
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+              <p className="font-medium">This statement is a scan, not a text PDF.</p>
+              <p className="mt-1 text-muted-foreground">
+                <span className="font-medium text-foreground">{fileName}</span> contains page
+                images with no text layer, so it cannot be read directly. The pages can be read
+                visually instead — this sends the statement to the same AI provider this app
+                already uses for category suggestions. You will still review and correct every
+                row before anything is imported.
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                Prefer not to? Download the original PDF from your bank&apos;s online banking
+                instead — those have a text layer and are read locally.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  if (pendingFile) void conversion.convert(pendingFile, { vision: true })
+                }}
+              >
+                <ScanText className="size-4" aria-hidden="true" />
+                Read this scan
+              </Button>
+              <Button type="button" variant="ghost" onClick={conversion.reset}>
+                Choose another file
+              </Button>
+            </div>
           </div>
         )}
 
