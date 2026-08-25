@@ -4,11 +4,13 @@ import * as React from "react"
 
 import { statementTextExtractor } from "@/features/statement-import/extraction/http-extractor"
 import {
+  failureDetail,
+  isFailureCode,
   PASSWORD_INCORRECT,
   PASSWORD_REQUIRED,
   SCANNED_PDF,
   TEXT_EXTRACTION_UNAVAILABLE,
-} from "@/features/statement-import/server/pdf-text"
+} from "@/features/statement-import/failure-codes"
 import { convertStatementText, revalidate, summarize } from "@/features/statement-import/pipeline"
 import type {
   ConversionResult,
@@ -71,6 +73,9 @@ export interface UseStatementConversion {
   /** True when the visual step is being offered because the PDF library
    * failed to load, rather than because the file is a scan. */
   textExtractionUnavailable: boolean
+  /** Underlying error text behind an environment failure, shown in the UI so
+   * it can be reported without digging through server logs. */
+  diagnosticDetail: string | null
   convert: (file: File, options?: { password?: string; vision?: boolean }) => Promise<void>
   updateDraft: (id: string, patch: Partial<DraftTransaction>) => void
   setIncluded: (id: string, included: boolean) => void
@@ -108,6 +113,7 @@ export function useStatementConversion(
   const [includedIds, setIncludedIds] = React.useState<ReadonlySet<string>>(new Set())
   const [passwordWasWrong, setPasswordWasWrong] = React.useState(false)
   const [textExtractionUnavailable, setTextExtractionUnavailable] = React.useState(false)
+  const [diagnosticDetail, setDiagnosticDetail] = React.useState<string | null>(null)
 
   const convert = React.useCallback(
     async (file: File, options: { password?: string; vision?: boolean } = {}) => {
@@ -128,8 +134,11 @@ export function useStatementConversion(
         // An encrypted statement is a normal situation with a normal fix, not
         // a failure — the dialog asks for the password and retries instead of
         // dead-ending on an error screen.
-        if (message === PASSWORD_REQUIRED || message === PASSWORD_INCORRECT) {
-          setPasswordWasWrong(message === PASSWORD_INCORRECT)
+        if (
+          isFailureCode(message, PASSWORD_REQUIRED) ||
+          isFailureCode(message, PASSWORD_INCORRECT)
+        ) {
+          setPasswordWasWrong(isFailureCode(message, PASSWORD_INCORRECT))
           setStage("password")
           return
         }
@@ -137,8 +146,12 @@ export function useStatementConversion(
         // The PDF has no text layer. Reading it visually is possible but
         // sends the document to a model, so the user opts in explicitly
         // rather than having it happen silently on their bank statement.
-        if (message === SCANNED_PDF || message === TEXT_EXTRACTION_UNAVAILABLE) {
-          setTextExtractionUnavailable(message === TEXT_EXTRACTION_UNAVAILABLE)
+        if (
+          isFailureCode(message, SCANNED_PDF) ||
+          isFailureCode(message, TEXT_EXTRACTION_UNAVAILABLE)
+        ) {
+          setTextExtractionUnavailable(isFailureCode(message, TEXT_EXTRACTION_UNAVAILABLE))
+          setDiagnosticDetail(failureDetail(message, TEXT_EXTRACTION_UNAVAILABLE))
           setStage("scanned")
           return
         }
@@ -192,6 +205,7 @@ export function useStatementConversion(
     setStage("idle")
     setPasswordWasWrong(false)
     setTextExtractionUnavailable(false)
+    setDiagnosticDetail(null)
     setError(null)
     setResult(null)
     setDrafts([])
@@ -224,6 +238,7 @@ export function useStatementConversion(
     hasBlockingErrors,
     passwordWasWrong,
     textExtractionUnavailable,
+    diagnosticDetail,
     convert,
     updateDraft,
     setIncluded,

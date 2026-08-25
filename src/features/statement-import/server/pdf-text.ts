@@ -2,6 +2,13 @@ import type { PDFParse as PDFParseType } from "pdf-parse"
 
 import { ok, fail, type ApiResult } from "@/lib/api-response"
 import { ensurePdfDomGlobals } from "@/features/statement-import/server/pdf-dom-shim"
+import {
+  PASSWORD_INCORRECT,
+  PASSWORD_REQUIRED,
+  SCANNED_PDF,
+  TEXT_EXTRACTION_UNAVAILABLE,
+  withDetail,
+} from "@/features/statement-import/failure-codes"
 
 /**
  * Server-side PDF text extraction, backing
@@ -43,22 +50,10 @@ export interface ExtractedStatementText {
   pageCount: number
 }
 
-/**
- * Sentinel error strings the client reacts to programmatically, following the
- * codebase's existing `fail("UNAUTHENTICATED")` convention rather than
- * inventing a second response shape. `features/statement-import/components/
- * statement-converter-dialog.tsx` maps these onto the password prompt.
- */
-export const PASSWORD_REQUIRED = "PASSWORD_REQUIRED"
-export const PASSWORD_INCORRECT = "PASSWORD_INCORRECT"
-/** The PDF carries no text layer — it is a scan or photo of a statement.
- * The dialog turns this into the offer to read the pages visually. */
-export const SCANNED_PDF = "SCANNED_PDF"
-/** The PDF library itself could not be loaded in this runtime, so the text
- * layer is unreadable here for reasons that have nothing to do with the
- * user's file. Distinct from SCANNED_PDF so the dialog never tells someone
- * their perfectly good PDF is a scan. */
-export const TEXT_EXTRACTION_UNAVAILABLE = "TEXT_EXTRACTION_UNAVAILABLE"
+/** Re-exported for server-side callers; the definitions live in
+ * `failure-codes.ts` so client code can import them without dragging pdfjs
+ * into the browser bundle. */
+export { PASSWORD_INCORRECT, PASSWORD_REQUIRED, SCANNED_PDF, TEXT_EXTRACTION_UNAVAILABLE }
 
 /** pdf-parse inserts a `-- N of M --` separator per page whether or not the
  * page contains anything, so those must be discounted before deciding a
@@ -203,7 +198,7 @@ function describeExtractionFailure(error: unknown, passwordWasSupplied: boolean)
     /failed to load external module|DOMMatrix|Path2D|ImageData|Cannot find module/i.test(message)
   ) {
     console.error("[statement-import] PDF library unavailable in this runtime:", error)
-    return TEXT_EXTRACTION_UNAVAILABLE
+    return withDetail(TEXT_EXTRACTION_UNAVAILABLE, message)
   }
 
   // Anything else is unexpected. Log it so it lands in the server's runtime

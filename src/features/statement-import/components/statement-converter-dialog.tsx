@@ -374,6 +374,11 @@ export function StatementConverterDialog({
                 category suggestions. You will still review and correct every row before
                 anything is imported.
               </p>
+              {conversion.textExtractionUnavailable && conversion.diagnosticDetail && (
+                <p className="mt-2 rounded border bg-muted/50 px-2 py-1 font-mono text-[11px] break-all text-muted-foreground">
+                  {conversion.diagnosticDetail}
+                </p>
+              )}
               {!conversion.textExtractionUnavailable && (
                 <p className="mt-1 text-muted-foreground">
                   Prefer not to? Download the original PDF from your bank&apos;s online banking
