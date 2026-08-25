@@ -127,3 +127,53 @@ export function computeOccurrenceStatus(
   }
   return "UPCOMING"
 }
+
+// ---------------------------------------------------------------------------
+// Re-anchoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Safety bound on the walk below. A bill whose anchor sits years in the past
+ * on a weekly schedule still converges well inside this, so hitting the cap
+ * means a pathological input rather than an expected outcome — same
+ * defence-in-depth rationale as `features/debt/payoff-math.ts`'s
+ * `MAX_SIMULATION_MONTHS`.
+ */
+const MAX_OCCURRENCE_STEPS = 10_000
+
+/**
+ * Every due date a bill anchored at `anchor` would fall on within
+ * `[fromInclusive, throughInclusive]`.
+ *
+ * This is the piece that makes a due-date *change* take effect. The ordinary
+ * generator (`service.ts`'s `ensureOccurrencesGenerated`) always continues
+ * from the latest occurrence already on file, which is exactly right for
+ * filling the calendar forward but means an edited `Bill.dueDate` can never
+ * influence anything: the cursor comes from a row generated under the old
+ * date, so future occurrences keep landing on the old day forever. Re-walking
+ * from the anchor is what lets "move Electric to the 10th" actually move it.
+ *
+ * The walk starts at the anchor itself (included when it falls in range), so
+ * a bill moved to a day earlier in the month than today still produces the
+ * correct sequence — the anchor is simply stepped forward until it reaches
+ * the window.
+ */
+export function computeOccurrenceDatesFrom(
+  anchor: Date,
+  schedule: BillSchedule,
+  fromInclusive: Date,
+  throughInclusive: Date,
+): Date[] {
+  const from = toUtcMidnight(fromInclusive)
+  const through = toUtcMidnight(throughInclusive)
+  const dates: Date[] = []
+
+  let cursor = toUtcMidnight(anchor)
+  for (let step = 0; step < MAX_OCCURRENCE_STEPS; step += 1) {
+    if (cursor.getTime() > through.getTime()) break
+    if (cursor.getTime() >= from.getTime()) dates.push(cursor)
+    cursor = computeNextDueDate(cursor, schedule)
+  }
+
+  return dates
+}

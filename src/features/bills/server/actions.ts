@@ -19,6 +19,7 @@ import {
   UnmarkPaidSchema,
 } from "@/features/bills/server/validation"
 import {
+  regenerateFutureOccurrences,
   toBill,
   toBillOccurrence,
   OCCURRENCE_TRANSACTION_INCLUDE,
@@ -247,6 +248,20 @@ export async function updateBill(input: unknown): Promise<ApiResult<Bill>> {
       ...(categoryId !== undefined ? { categoryId } : {}),
     },
   })
+
+  // Changing when a bill is due has to move the occurrences, not just the
+  // anchor row. `ensureOccurrencesGenerated` continues from the latest
+  // occurrence already on file, so without this an edited due date changes
+  // nothing the user can see — the list, calendar, and "next due" all read
+  // occurrences. Paid and already-due occurrences are preserved; see
+  // `regenerateFutureOccurrences`.
+  const scheduleChanged = schedule !== undefined && schedule !== existing.schedule
+  const dueDateChanged =
+    dueDate !== undefined && dueDate.getTime() !== existing.dueDate.getTime()
+
+  if (scheduleChanged || dueDateChanged) {
+    await regenerateFutureOccurrences(updated)
+  }
 
   return ok(toBill(updated))
 }

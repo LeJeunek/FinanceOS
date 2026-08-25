@@ -19,6 +19,7 @@ import { MonthSchema } from "./validation"
 import {
   addUtcMonths,
   computeNextDueDate,
+  computeOccurrenceDatesFrom,
   computeOccurrenceStatus,
   toUtcMidnight,
 } from "./occurrence"
@@ -200,6 +201,63 @@ async function ensureOccurrencesGenerated(
   if (toCreate.length > 0) {
     await db.billOccurrence.createMany({ data: toCreate, skipDuplicates: true })
   }
+}
+
+/**
+ * Re-anchors a bill's *future* occurrences after its `dueDate` or `schedule`
+ * changes.
+ *
+ * Why this is needed: `ensureOccurrencesGenerated` always continues from the
+ * latest occurrence already on file. Once any occurrence exists, an edited
+ * `Bill.dueDate` therefore has no effect whatsoever — the cursor comes from a
+ * row generated under the old date, so every future occurrence keeps landing
+ * on the old day. Editing a bill to "the 10th" would update the `Bill` row and
+ * change nothing a user can actually see, since the list, the calendar, and
+ * "next due" all read occurrences rather than the anchor.
+ *
+ * What it deliberately does NOT touch:
+ *   - **Anything paid**, by either of bills.md AC7's paths (a linked
+ *     Transaction, or a manual amount+date). Payment history is a record of
+ *     what happened and is never rewritten by a schedule change.
+ *   - **Anything already due**, i.e. dated before today. A missed or pending
+ *     bill from last week does not retroactively move because next month's
+ *     due date changed.
+ *
+ * Everything from today forward that is still unpaid is replaced by the
+ * sequence the new anchor implies. `skipDuplicates` plus
+ * `@@unique([billId, dueDate])` keeps this safe against a concurrent
+ * generation racing it.
+ */
+export async function regenerateFutureOccurrences(
+  bill: BillGenerationSource,
+): Promise<void> {
+  if (bill.archivedAt) {
+    return
+  }
+
+  const today = toUtcMidnight(new Date())
+  const horizon = addUtcMonths(today, DEFAULT_HORIZON_MONTHS)
+
+  await db.billOccurrence.deleteMany({
+    where: {
+      billId: bill.id,
+      dueDate: { gte: today },
+      // Unpaid on both of AC7's paths — see this function's JSDoc.
+      transactionId: null,
+      paidAmount: null,
+      paidDate: null,
+    },
+  })
+
+  const dates = computeOccurrenceDatesFrom(bill.dueDate, bill.schedule, today, horizon)
+  if (dates.length === 0) {
+    return
+  }
+
+  await db.billOccurrence.createMany({
+    data: dates.map((dueDate) => ({ billId: bill.id, userId: bill.userId, dueDate })),
+    skipDuplicates: true,
+  })
 }
 
 // ---------------------------------------------------------------------------

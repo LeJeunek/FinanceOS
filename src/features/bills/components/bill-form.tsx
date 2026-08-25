@@ -55,6 +55,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -77,6 +78,65 @@ export const BILL_SCHEDULE_LABELS: Record<BillSchedule, string> = {
 const BILL_SCHEDULE_VALUES = Object.keys(BILL_SCHEDULE_LABELS) as BillSchedule[]
 
 const NONE_CATEGORY_VALUE = "__none__"
+
+/** Ordinal suffix for a day of the month ("10th", "1st", "22nd"). */
+function ordinal(day: number): string {
+  if (day % 100 >= 11 && day % 100 <= 13) return `${day}th`
+  switch (day % 10) {
+    case 1:
+      return `${day}st`
+    case 2:
+      return `${day}nd`
+    case 3:
+      return `${day}rd`
+    default:
+      return `${day}th`
+  }
+}
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+]
+
+/**
+ * Plain-English restatement of what a due date means once a recurring
+ * schedule is applied to it — "Repeats on the 10th of each month".
+ *
+ * The date field is an anchor, not a one-off date, which is not obvious from
+ * a bare date input: a user wanting "the 10th of the month" has no way to
+ * tell whether picking a date in September sets a day-of-month or a single
+ * dated event. Saying it back to them removes the guess.
+ */
+function describeRecurrence(dueDate: string, schedule: BillSchedule): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return null
+  const date = new Date(`${dueDate}T00:00:00.000Z`)
+  if (Number.isNaN(date.getTime())) return null
+
+  const day = date.getUTCDate()
+
+  switch (schedule) {
+    case "WEEKLY":
+      return `Repeats every ${WEEKDAYS[date.getUTCDay()]}.`
+    case "BIWEEKLY":
+      return `Repeats every other ${WEEKDAYS[date.getUTCDay()]}.`
+    case "MONTHLY":
+      return day > 28
+        ? `Repeats on the ${ordinal(day)} of each month, moving to the last day in shorter months.`
+        : `Repeats on the ${ordinal(day)} of each month.`
+    case "QUARTERLY":
+      return `Repeats every three months, on the ${ordinal(day)}.`
+    case "ANNUALLY":
+      return `Repeats once a year, on this date.`
+    default:
+      return null
+  }
+}
 
 /** Client-side form schema. Deliberately separate from
  * `server/validation.ts`'s `CreateBillSchema`/`UpdateBillSchema` — those
@@ -255,10 +315,16 @@ export function BillFormDialog({
                 name="dueDate"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{isEditMode ? "Due date" : "First due date"}</FormLabel>
+                    <FormLabel>{isEditMode ? "Next due date" : "First due date"}</FormLabel>
                     <FormControl>
                       <Input type="date" {...field} />
                     </FormControl>
+                    {describeRecurrence(field.value, form.watch("schedule")) && (
+                      <FormDescription>
+                        {describeRecurrence(field.value, form.watch("schedule"))}
+                        {isEditMode ? " Changing it reschedules upcoming occurrences; paid ones are left alone." : ""}
+                      </FormDescription>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
