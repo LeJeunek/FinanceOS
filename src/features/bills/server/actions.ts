@@ -17,6 +17,7 @@ import {
   MarkPaidSchema,
   LinkTransactionSchema,
   UnmarkPaidSchema,
+  DeleteOccurrenceSchema,
 } from "@/features/bills/server/validation"
 import {
   regenerateFutureOccurrences,
@@ -493,4 +494,55 @@ export async function unmarkOccurrencePaid(
   })
 
   return ok(toBillOccurrence(updated, new Date()))
+}
+
+/**
+ * Permanently deletes a single `BillOccurrence` row — unlike
+ * `unmarkOccurrencePaid`, which only clears its paid fields and leaves the
+ * row in place, this removes it outright. Needed because occurrences
+ * generated under a schedule that later turns out to be wrong (e.g. a bill
+ * mistakenly left on Biweekly for a few cycles before being corrected to
+ * Monthly) otherwise sit in the payment history forever — `updateBill`'s
+ * `regenerateFutureOccurrences` only ever touches unpaid, not-yet-due
+ * occurrences (bills.md's payment-history-is-never-rewritten rule), so a
+ * stale *paid* occurrence from the old schedule has no other way to go away.
+ *
+ * If the occurrence being deleted is linked to a Transaction (AC7's linked
+ * paid path), that Transaction is deleted too, not just unlinked — a linked
+ * Transaction only exists to represent this occurrence's payment, so
+ * removing the occurrence without also removing the transaction it recorded
+ * would leave an orphaned withdrawal behind (a duplicate, since the real bill
+ * this occurrence never should have existed for was never actually paid
+ * twice). Both deletes run inside one `db.$transaction` so a failure partway
+ * through can't leave the transaction deleted but the occurrence still
+ * present, or vice versa.
+ */
+export async function deleteOccurrence(
+  input: unknown,
+): Promise<ApiResult<{ id: string }>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = DeleteOccurrenceSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid occurrence id")
+  }
+
+  const occurrence = await db.billOccurrence.findFirst({
+    where: { id: parsed.data.occurrenceId, userId: user.id },
+  })
+  if (!occurrence) {
+    return fail("Bill occurrence not found")
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.billOccurrence.delete({ where: { id: occurrence.id } })
+    if (occurrence.transactionId) {
+      await tx.transaction.deleteMany({
+        where: { id: occurrence.transactionId, userId: user.id },
+      })
+    }
+  })
+
+  return ok({ id: occurrence.id })
 }

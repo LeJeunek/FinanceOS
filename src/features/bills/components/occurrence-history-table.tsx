@@ -17,11 +17,12 @@
 
 import { useState } from "react"
 import type { ColumnDef } from "@tanstack/react-table"
+import { Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 
 import type { BillOccurrence } from "@/features/bills/types"
-import { unmarkOccurrencePaid } from "@/features/bills/server/actions"
+import { deleteOccurrence, unmarkOccurrencePaid } from "@/features/bills/server/actions"
 import { OccurrenceStatusBadge } from "@/features/bills/components/occurrence-status-badge"
 import { MarkPaidDialog, type MarkPaidOccurrenceSummary } from "@/features/bills/components/mark-paid-dialog"
 import { formatDate } from "@/lib/utils"
@@ -46,6 +47,8 @@ export function OccurrenceHistoryTable({
   const router = useRouter()
   const [markPaidTarget, setMarkPaidTarget] = useState<MarkPaidOccurrenceSummary | null>(null)
   const [unmarkingId, setUnmarkingId] = useState<string | null>(null)
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   async function handleUnmark(occurrenceId: string) {
     setUnmarkingId(occurrenceId)
@@ -58,6 +61,21 @@ export function OccurrenceHistoryTable({
     }
 
     toast.success("Occurrence un-marked as paid.")
+    router.refresh()
+  }
+
+  async function handleDelete(occurrenceId: string) {
+    setDeletingId(occurrenceId)
+    const result = await deleteOccurrence({ occurrenceId })
+    setDeletingId(null)
+    setConfirmingDeleteId(null)
+
+    if (!result.success) {
+      toast.error(result.error)
+      return
+    }
+
+    toast.success("Occurrence deleted.")
     router.refresh()
   }
 
@@ -130,43 +148,86 @@ export function OccurrenceHistoryTable({
       header: "",
       cell: ({ row }) => {
         const occurrence = row.original
+
+        // Inline "Confirm delete?" state (this codebase has no AlertDialog
+        // primitive yet — mirrors goals/components/contribution-history-
+        // list.tsx's identical inline-confirm pattern) replaces the ordinary
+        // action buttons for whichever row is currently being deleted.
+        if (confirmingDeleteId === occurrence.id) {
+          return (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Delete?</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-11"
+                onClick={() => setConfirmingDeleteId(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                className="h-11"
+                disabled={deletingId === occurrence.id}
+                onClick={() => handleDelete(occurrence.id)}
+              >
+                {deletingId === occurrence.id ? "Deleting..." : "Confirm delete"}
+              </Button>
+            </div>
+          )
+        }
+
         // Accessibility fix (Bug Hunter, Phase 5a review gate,
         // data-table-row-action-buttons-below-44px-touch-target.md): `sm`
         // alone is 28px tall, below Responsive AC5's binding 44px minimum
         // (width is already comfortably >44px for both labels, so only
         // height needs the override). Renders unchanged in both DataTable's
         // table view and DataTableCardList's mobile card view by design.
-        if (occurrence.status === "PAID") {
-          return (
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {occurrence.status === "PAID" ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-11"
+                disabled={unmarkingId === occurrence.id}
+                onClick={() => handleUnmark(occurrence.id)}
+              >
+                {unmarkingId === occurrence.id ? "Un-marking..." : "Unmark paid"}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-11"
+                onClick={() =>
+                  setMarkPaidTarget({
+                    id: occurrence.id,
+                    billName,
+                    dueDate: occurrence.dueDate,
+                    expectedAmount,
+                  })
+                }
+              >
+                Mark paid
+              </Button>
+            )}
             <Button
               type="button"
-              variant="outline"
-              size="sm"
-              className="h-11"
-              disabled={unmarkingId === occurrence.id}
-              onClick={() => handleUnmark(occurrence.id)}
+              variant="ghost"
+              size="icon-sm"
+              className="size-11"
+              aria-label={`Delete occurrence due ${formatDate(occurrence.dueDate)}`}
+              onClick={() => setConfirmingDeleteId(occurrence.id)}
             >
-              {unmarkingId === occurrence.id ? "Un-marking..." : "Unmark paid"}
+              <Trash2 className="size-4" aria-hidden="true" />
             </Button>
-          )
-        }
-        return (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-11"
-            onClick={() =>
-              setMarkPaidTarget({
-                id: occurrence.id,
-                billName,
-                dueDate: occurrence.dueDate,
-                expectedAmount,
-              })
-            }
-          >
-            Mark paid
-          </Button>
+          </div>
         )
       },
     },

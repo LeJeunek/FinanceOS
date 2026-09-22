@@ -216,6 +216,18 @@ export const UnmarkPaidSchema = z.object({
 
 export type UnmarkPaidInput = z.infer<typeof UnmarkPaidSchema>
 
+/** `deleteOccurrence` input — removes a single `BillOccurrence` row outright
+ * (unlike `unmarkOccurrencePaid`, which only clears its paid fields and
+ * leaves the row in place). Exists for cleaning up a stale/incorrect
+ * occurrence — e.g. one generated under a schedule that was later corrected
+ * (see `server/actions.ts`'s `deleteOccurrence` JSDoc) — that would otherwise
+ * sit in the payment history forever with no way to remove it. */
+export const DeleteOccurrenceSchema = z.object({
+  occurrenceId: idSchema("Occurrence id"),
+})
+
+export type DeleteOccurrenceInput = z.infer<typeof DeleteOccurrenceSchema>
+
 // ---------------------------------------------------------------------------
 // Calendar v1 (backed entirely by Bills' data — see api-contracts.md)
 // ---------------------------------------------------------------------------
