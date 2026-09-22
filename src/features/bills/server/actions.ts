@@ -239,30 +239,42 @@ export async function updateBill(input: unknown): Promise<ApiResult<Bill>> {
     }
   }
 
-  const updated = await db.bill.update({
-    where: { id },
-    data: {
-      ...(name !== undefined ? { name } : {}),
-      ...(expectedAmount !== undefined ? { expectedAmount } : {}),
-      ...(dueDate !== undefined ? { dueDate } : {}),
-      ...(schedule !== undefined ? { schedule } : {}),
-      ...(categoryId !== undefined ? { categoryId } : {}),
-    },
-  })
-
   // Changing when a bill is due has to move the occurrences, not just the
   // anchor row. `ensureOccurrencesGenerated` continues from the latest
   // occurrence already on file, so without this an edited due date changes
   // nothing the user can see — the list, calendar, and "next due" all read
   // occurrences. Paid and already-due occurrences are preserved; see
   // `regenerateFutureOccurrences`.
-  const scheduleChanged = schedule !== undefined && schedule !== existing.schedule
-  const dueDateChanged =
-    dueDate !== undefined && dueDate.getTime() !== existing.dueDate.getTime()
+  //
+  // The anchor write and the occurrence re-anchoring run inside one
+  // `db.$transaction` — previously these were two separate top-level `db`
+  // calls, so anything that interrupted the request between them (a dropped
+  // connection, a serverless timeout) could leave `Bill.dueDate` updated
+  // with every existing `BillOccurrence` row silently still on the old
+  // date/cadence: indistinguishable, from the UI, from the edit having no
+  // effect at all.
+  const updated = await db.$transaction(async (tx) => {
+    const bill = await tx.bill.update({
+      where: { id },
+      data: {
+        ...(name !== undefined ? { name } : {}),
+        ...(expectedAmount !== undefined ? { expectedAmount } : {}),
+        ...(dueDate !== undefined ? { dueDate } : {}),
+        ...(schedule !== undefined ? { schedule } : {}),
+        ...(categoryId !== undefined ? { categoryId } : {}),
+      },
+    })
 
-  if (scheduleChanged || dueDateChanged) {
-    await regenerateFutureOccurrences(updated)
-  }
+    const scheduleChanged = schedule !== undefined && schedule !== existing.schedule
+    const dueDateChanged =
+      dueDate !== undefined && dueDate.getTime() !== existing.dueDate.getTime()
+
+    if (scheduleChanged || dueDateChanged) {
+      await regenerateFutureOccurrences(tx, bill)
+    }
+
+    return bill
+  })
 
   return ok(toBill(updated))
 }

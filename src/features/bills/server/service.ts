@@ -227,8 +227,20 @@ async function ensureOccurrencesGenerated(
  * sequence the new anchor implies. `skipDuplicates` plus
  * `@@unique([billId, dueDate])` keeps this safe against a concurrent
  * generation racing it.
+ *
+ * Takes an explicit Prisma client (`db` itself, or a `Prisma.TransactionClient`
+ * — a `PrismaClient` is structurally assignable to `Prisma.TransactionClient`,
+ * same convention as `@/lib/transaction-link-guard.ts`) rather than always
+ * reaching for the top-level `db` singleton internally. `server/actions.ts`'s
+ * `updateBill` — this function's only caller — runs its own `db.bill.update`
+ * and this call inside one `db.$transaction`, so the anchor write and the
+ * occurrence re-anchoring commit or fail together: without that, a request
+ * that fails or gets cut off between the two leaves `Bill.dueDate` pointing
+ * at the new date while every visible occurrence is silently still on the
+ * old one, which looks exactly like the edit "didn't take."
  */
 export async function regenerateFutureOccurrences(
+  client: Pick<Prisma.TransactionClient, "billOccurrence">,
   bill: BillGenerationSource,
 ): Promise<void> {
   if (bill.archivedAt) {
@@ -238,7 +250,7 @@ export async function regenerateFutureOccurrences(
   const today = toUtcMidnight(new Date())
   const horizon = addUtcMonths(today, DEFAULT_HORIZON_MONTHS)
 
-  await db.billOccurrence.deleteMany({
+  await client.billOccurrence.deleteMany({
     where: {
       billId: bill.id,
       dueDate: { gte: today },
@@ -254,7 +266,7 @@ export async function regenerateFutureOccurrences(
     return
   }
 
-  await db.billOccurrence.createMany({
+  await client.billOccurrence.createMany({
     data: dates.map((dueDate) => ({ billId: bill.id, userId: bill.userId, dueDate })),
     skipDuplicates: true,
   })
