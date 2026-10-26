@@ -52,10 +52,17 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+    // The font variables go on <html>, not <body>: globals.css applies
+    // `font-sans` to `html`, and a custom property only resolves on the
+    // element that defines it or its descendants -- defined on <body>, it
+    // was undefined where the font is actually set. next-themes only adds
+    // its `dark`/`light` class to this element, so it leaves these alone.
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
+    >
+      <body className="antialiased">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Providers>
             <TooltipProvider>
