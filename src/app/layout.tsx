@@ -17,9 +17,35 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 })
 
+const SHARE_DESCRIPTION =
+  "A full-stack personal finance platform: accounts, budgeting, debt payoff, investments, and goals. Try the live demo, no sign-up."
+
 export const metadata: Metadata = {
   title: "LK Budget",
   description: "A personal finance dashboard for tracking accounts, budgets, and financial goals in one place.",
+  // Link previews (LinkedIn, Slack, iMessage, X...) are built from Open
+  // Graph tags, and crawlers reject relative image URLs -- without an
+  // absolute base, `opengraph-image.png` (this folder's file-convention
+  // preview card, applied to every route) can't be fetched and a shared link
+  // shows a blank placeholder. VERCEL_PROJECT_PRODUCTION_URL is the
+  // production domain (custom or *.vercel.app) on every Vercel build,
+  // previews included, so a shared preview link still shows the card.
+  metadataBase: new URL(
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "http://localhost:3000",
+  ),
+  openGraph: {
+    type: "website",
+    siteName: "FinanceOS",
+    title: "FinanceOS: personal finance, all in one place",
+    description: SHARE_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FinanceOS: personal finance, all in one place",
+    description: SHARE_DESCRIPTION,
+  },
   // Two emblem variants (public/brand/emblem-{light,dark}.png), picked by the
   // browser via `prefers-color-scheme` — the light-background mark for a
   // light browser theme, the dark-background mark for a dark one, so the

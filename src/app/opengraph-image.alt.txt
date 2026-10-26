@@ -1,0 +1,1 @@
+FinanceOS: a personal finance dashboard showing net worth, monthly income and expenses, budget and financial health scores, and spending by category.
